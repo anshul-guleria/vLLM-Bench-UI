@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Probe — vLLM bench</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <script defer src="{{ url_for('static', filename='app.js') }}"></script>
+</head>
+<body>
+  <div class="shell">
+    <aside class="rail">
+      <div class="brand">
+        <span class="brand-mark">PROBE</span>
+        <span class="brand-sub">vLLM bench</span>
+      </div>
+
+      <nav class="rail-nav" aria-label="Modes">
+        <button class="rail-tab is-active" data-tab="chat" type="button">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2 3h12v8H7l-4 3v-3H2z"/></svg>
+          <span>Chat</span>
+        </button>
+        <button class="rail-tab" data-tab="single" type="button">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M9 1 3 9h4l-1 6 7-9H8z"/></svg>
+          <span>Single call</span>
+        </button>
+        <button class="rail-tab" data-tab="load" type="button">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2 13V7M6 13V3M10 13V9M14 13V5"/></svg>
+          <span>Load test</span>
+        </button>
+      </nav>
+
+      <div class="rail-foot">
+        <div class="rail-block">
+          <span class="rail-label">Endpoint</span>
+          <span class="rail-value" id="rail-endpoint">…</span>
+        </div>
+        <div class="rail-block">
+          <span class="rail-label">Model</span>
+          <span class="rail-value" id="rail-model">…</span>
+        </div>
+        <div class="rail-block">
+          <span class="rail-label">Auth key</span>
+          <span class="rail-value" id="rail-key">…</span>
+        </div>
+      </div>
+    </aside>
+
+    <main class="work">
+      <header class="topbar">
+        <div class="conn">
+          <span class="conn-dot" id="conn-dot" aria-hidden="true"></span>
+          <span id="conn-label">Connecting…</span>
+        </div>
+        <div class="topbar-right">
+          <span class="chip" id="model-chip">no model</span>
+          <button class="btn ghost small" id="refresh" type="button">Reload config</button>
+        </div>
+      </header>
+
+      <div id="notice" class="notice" role="status" aria-live="polite" hidden></div>
+
+      <!-- CHAT ------------------------------------------------------------ -->
+      <section class="tab-panel" id="tab-chat">
+        <div class="panel-head">
+          <div>
+            <h1>Chat</h1>
+            <p>Talk to the model and watch what each reply costs.</p>
+          </div>
+          <button class="btn ghost" id="chat-clear" type="button">Clear thread</button>
+        </div>
+
+        <details class="settings">
+          <summary>Generation settings</summary>
+          <div class="settings-grid">
+            <label class="field">
+              <span class="field-label">Temperature</span>
+              <input type="number" id="chat-temperature" value="0.7" min="0" max="2" step="0.1">
+            </label>
+            <label class="field">
+              <span class="field-label">Max tokens</span>
+              <input type="number" id="chat-max" value="512" min="1" max="32768" step="1">
+            </label>
+            <label class="field wide">
+              <span class="field-label">System prompt</span>
+              <textarea id="chat-system" rows="2" placeholder="Optional. Sets the model's role for this thread."></textarea>
+            </label>
+          </div>
+        </details>
+
+        <div class="thread" id="chat-thread" aria-live="polite">
+          <div class="empty" id="chat-empty">
+            <span class="empty-rule"></span>
+            <p>No messages yet. Ask something and the reply will arrive token by token, with its timing underneath.</p>
+          </div>
+        </div>
+
+        <form class="composer" id="chat-form">
+          <textarea id="chat-input" rows="3" placeholder="Ask the model something…"></textarea>
+          <div class="composer-foot">
+            <span class="hint">Enter to send · Shift+Enter for a new line</span>
+            <button class="btn primary" id="chat-send" type="submit">Send</button>
+          </div>
+        </form>
+      </section>
+
+      <!-- SINGLE ---------------------------------------------------------- -->
+      <section class="tab-panel" id="tab-single" hidden>
+        <div class="panel-head">
+          <div>
+            <h1>Single call</h1>
+            <p>One request, measured end to end. Streaming gives you time to first token.</p>
+          </div>
+        </div>
+
+        <div class="single-grid">
+          <form class="single-form" id="single-form">
+            <label class="field">
+              <span class="field-label">Prompt</span>
+              <textarea id="single-prompt" rows="6" placeholder="Write a prompt you can re-use as a baseline…">Write a haiku about graphics cards.</textarea>
+            </label>
+            <div class="fields-row">
+              <label class="field">
+                <span class="field-label">Temperature</span>
+                <input type="number" id="single-temperature" value="0.7" min="0" max="2" step="0.1">
+              </label>
+              <label class="field">
+                <span class="field-label">Max tokens</span>
+                <input type="number" id="single-max" value="256" min="1" max="32768" step="1">
+              </label>
+              <label class="check">
+                <input type="checkbox" id="single-stream" checked>
+                <span>Stream</span>
+              </label>
+            </div>
+            <button class="btn primary wide" id="single-send" type="submit">Send request</button>
+          </form>
+
+          <div class="single-result">
+            <div class="readout" id="single-readout">
+              <div class="cell"><span class="cell-label">Time to first token</span><span class="cell-value" id="single-ttft">—</span></div>
+              <div class="cell"><span class="cell-label">Total time</span><span class="cell-value" id="single-latency">—</span></div>
+              <div class="cell"><span class="cell-label">Tokens in / out</span><span class="cell-value" id="single-tokens">—</span></div>
+              <div class="cell"><span class="cell-label">Output speed</span><span class="cell-value" id="single-tps">—</span></div>
+            </div>
+            <div class="output" id="single-output">
+              <p class="placeholder">The response will appear here.</p>
+            </div>
+            <details class="raw" id="single-raw-wrap" hidden>
+              <summary>Raw result</summary>
+              <pre id="single-raw"></pre>
+            </details>
+          </div>
+        </div>
+      </section>
+
+      <!-- LOAD ------------------------------------------------------------ -->
+      <section class="tab-panel" id="tab-load" hidden>
+        <div class="panel-head">
+          <div>
+            <h1>Load test</h1>
+            <p>Repeat one prompt under concurrency. Percentiles are computed from successful requests only.</p>
+          </div>
+          <button class="btn danger" id="load-stop" type="button" hidden>Stop</button>
+        </div>
+
+        <form class="load-form" id="load-form">
+          <label class="field">
+            <span class="field-label">Prompt</span>
+            <textarea id="load-prompt" rows="3" placeholder="One prompt, sent to every request…">Explain what a KV cache is in three sentences.</textarea>
+          </label>
+          <div class="fields-row">
+            <label class="field">
+              <span class="field-label">Requests</span>
+              <input type="number" id="load-count" value="20" min="1" max="1000" step="1">
+            </label>
+            <label class="field">
+              <span class="field-label">Concurrency</span>
+              <input type="number" id="load-concurrency" value="4" min="1" max="200" step="1">
+            </label>
+            <label class="field">
+              <span class="field-label">Max tokens</span>
+              <input type="number" id="load-max" value="128" min="1" max="32768" step="1">
+            </label>
+            <label class="field">
+              <span class="field-label">Temperature</span>
+              <input type="number" id="load-temperature" value="0.7" min="0" max="2" step="0.1">
+            </label>
+            <label class="check">
+              <input type="checkbox" id="load-stream" checked>
+              <span>Stream</span>
+            </label>
+            <button class="btn primary" id="load-run" type="submit">Run test</button>
+          </div>
+          <label class="field">
+            <span class="field-label">System prompt <span class="opt">optional</span></span>
+            <input type="text" id="load-system" placeholder="Applied to every request">
+          </label>
+        </form>
+
+        <div class="readout live" id="load-readout">
+          <div class="cell"><span class="cell-label">Elapsed</span><span class="cell-value" id="live-wall">—</span></div>
+          <div class="cell"><span class="cell-label">Completed</span><span class="cell-value" id="live-done">0 / 0</span></div>
+          <div class="cell"><span class="cell-label">Requests / s</span><span class="cell-value" id="live-rps">—</span></div>
+          <div class="cell"><span class="cell-label">Output tokens / s</span><span class="cell-value" id="live-tps">—</span></div>
+          <div class="cell"><span class="cell-label">Latency p95</span><span class="cell-value" id="live-p95">—</span></div>
+        </div>
+
+        <figure class="strip-figure">
+          <figcaption class="strip-head">
+            <span>Per-request latency</span>
+            <span class="strip-legend" id="strip-legend">
+              <span class="key ok"></span>ok <span class="key fail"></span>failed <span class="key line"></span>p95
+            </span>
+          </figcaption>
+          <div class="strip" id="strip" role="img" aria-label="Latency per request">
+            <div class="strip-empty" id="strip-empty">No samples yet</div>
+            <div class="strip-p95" id="strip-p95" hidden><span id="strip-p95-label"></span></div>
+            <div class="strip-ticks" id="strip-ticks"></div>
+          </div>
+        </figure>
+
+        <section class="outputs" id="load-outputs-wrap" hidden>
+          <div class="outputs-head">
+            <span>Live outputs</span>
+            <span id="outputs-count">0 requests</span>
+          </div>
+          <div class="outputs-grid" id="load-outputs">
+            <p class="outputs-empty" id="outputs-empty">Tokens appear here as each request streams.</p>
+          </div>
+        </section>
+
+        <div class="summary-grid" id="load-summary" hidden></div>
+
+        <div class="table-wrap">
+          <table class="results" id="load-table">
+            <thead>
+              <tr>
+                <th>#</th><th>Status</th><th>TTFT</th><th>Latency</th>
+                <th>Tokens</th><th>Tok/s</th><th>Error</th>
+              </tr>
+            </thead>
+            <tbody id="load-rows"></tbody>
+          </table>
+          <p class="table-empty" id="load-empty">Results will fill in as requests complete.</p>
+        </div>
+      </section>
+    </main>
+  </div>
+</body>
+</html>
