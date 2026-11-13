@@ -53,10 +53,33 @@
           <span id="conn-label">Connecting…</span>
         </div>
         <div class="topbar-right">
-          <span class="chip" id="model-chip">no model</span>
-          <button class="btn ghost small" id="refresh" type="button">Reload config</button>
+          <label class="sr-only" for="profile-select">Saved connection</label>
+          <select id="profile-select" class="profile-select"></select>
+          <button class="btn ghost small" id="profile-edit" type="button">Edit</button>
+          <button class="btn ghost small" id="refresh" type="button">Reload</button>
         </div>
       </header>
+
+      <form class="connection-editor" id="connection-form" hidden>
+        <label class="field">
+          <span class="field-label">Base URL</span>
+          <input type="url" id="connection-url" placeholder="http://localhost:8000/v1" spellcheck="false" required>
+        </label>
+        <label class="field">
+          <span class="field-label">Model</span>
+          <input type="text" id="connection-model" list="model-options" placeholder="Qwen/Qwen3-0.6B" spellcheck="false" required>
+        </label>
+        <datalist id="model-options"></datalist>
+        <div class="editor-actions">
+          <button class="btn primary small" id="connection-save" type="submit">Save &amp; use</button>
+          <button class="btn ghost small" id="connection-cancel" type="button">Cancel</button>
+          <button class="btn danger small" id="connection-delete" type="button">Delete</button>
+        </div>
+        <p class="editor-hint">
+          Saving a new endpoint + model pair adds it to the dropdown. Pairs live in
+          <code>profiles.json</code> on the server; the API key still comes from <code>.env</code>.
+        </p>
+      </form>
 
       <div id="notice" class="notice" role="status" aria-live="polite" hidden></div>
 

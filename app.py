@@ -22,6 +22,7 @@ import httpx
 from flask import Flask, Response, jsonify, render_template, request, stream_with_context
 
 import bench
+from profiles import ProfileStore
 
 SSE_HEADERS = {
     "Cache-Control": "no-cache",
@@ -87,15 +88,49 @@ def list_models(endpoint: bench.Endpoint) -> list[str]:
         return []
 
 
-def create_app(endpoint: bench.Endpoint | None = None) -> Flask:
+def _with_profile(profile, base: bench.Endpoint) -> bench.Endpoint:
+    """Combine a saved connection with the process-wide key and timeout."""
+    return bench.Endpoint(
+        base_url=profile.base_url,
+        api_key=base.api_key,
+        model=profile.model,
+        timeout=base.timeout,
+    )
+
+
+def create_app(
+    endpoint: bench.Endpoint | None = None,
+    profiles_path: Path | None = None,
+) -> Flask:
     app = Flask(__name__)
-    app.config["ENDPOINT"] = endpoint or endpoint_from_env()
+    base = endpoint or endpoint_from_env()
+    if profiles_path is None and endpoint is None:
+        profiles_path = Path(__file__).with_name("profiles.json")
+    store = ProfileStore(profiles_path, seed=(base.base_url, base.model))
+
+    app.config["BASE_ENDPOINT"] = base
+    app.config["STORE"] = store
+    app.config["ENDPOINT"] = _with_profile(store.active, base)
     app.config["RUNS"] = {}
     app.config["RUNS_LOCK"] = threading.Lock()
     app.json.sort_keys = False
 
     def endpoint_now() -> bench.Endpoint:
         return app.config["ENDPOINT"]
+
+    def sync_endpoint() -> bench.Endpoint:
+        merged = _with_profile(app.config["STORE"].active, app.config["BASE_ENDPOINT"])
+        app.config["ENDPOINT"] = merged
+        return merged
+
+    def connection_state() -> dict:
+        active = app.config["STORE"].active
+        return {
+            "profiles": [p.to_dict() for p in app.config["STORE"].profiles],
+            "active_id": active.id,
+            "base_url": active.base_url,
+            "model": active.model,
+        }
 
     @app.get("/")
     def index():
@@ -106,13 +141,52 @@ def create_app(endpoint: bench.Endpoint | None = None) -> Flask:
         ep = endpoint_now()
         return jsonify(
             {
-                "base_url": ep.base_url,
-                "model": ep.model,
+                **connection_state(),
                 "models": list_models(ep),
                 "api_key_set": bool(ep.api_key),
                 "timeout": ep.timeout,
             }
         )
+
+    @app.post("/api/profiles")
+    def save_profile():
+        body = request.get_json(silent=True) or {}
+        base_url = str(body.get("base_url") or "").strip().rstrip("/")
+        model = str(body.get("model") or "").strip()
+        if not base_url.startswith(("http://", "https://")):
+            return jsonify({"error": "base URL must start with http:// or https://"}), 400
+        if not model:
+            return jsonify({"error": "model is required"}), 400
+
+        store = app.config["STORE"]
+        known = {(p.base_url, p.model) for p in store.profiles}
+        store.upsert(base_url, model)
+        sync_endpoint()
+        status = 200 if (base_url, model) in known else 201
+        return jsonify(connection_state()), status
+
+    @app.post("/api/profiles/<profile_id>/activate")
+    def activate_profile(profile_id: str):
+        try:
+            app.config["STORE"].activate(profile_id)
+        except KeyError:
+            return jsonify({"error": "unknown connection"}), 404
+        sync_endpoint()
+        return jsonify(connection_state())
+
+    @app.delete("/api/profiles/<profile_id>")
+    def delete_profile(profile_id: str):
+        store = app.config["STORE"]
+        if len(store.profiles) <= 1:
+            return jsonify({"error": "at least one connection must remain"}), 400
+        try:
+            store.delete(profile_id)
+        except KeyError:
+            return jsonify({"error": "unknown connection"}), 404
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+        sync_endpoint()
+        return jsonify(connection_state())
 
     @app.post("/api/chat/stream")
     def chat_stream():

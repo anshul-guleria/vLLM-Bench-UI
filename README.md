@@ -79,9 +79,9 @@ Open <http://127.0.0.1:5050>.
 
 | Variable | Meaning |
 | --- | --- |
-| `VLLM_BASE_URL` | OpenAI-compatible base, e.g. `http://localhost:8000/v1` |
-| `VLLM_MODEL` | Model id exactly as vLLM reports it |
-| `VLLM_API_KEY` | Optional bearer token; never sent to the browser |
+| `VLLM_BASE_URL` | OpenAI-compatible base, e.g. `http://localhost:8000/v1` — seeds the first saved connection |
+| `VLLM_MODEL` | Model id exactly as vLLM reports it — seeds the first saved connection |
+| `VLLM_API_KEY` | Optional bearer token; never sent to the browser, applies to every saved connection |
 | `FLASK_HOST` / `FLASK_PORT` | Where this UI listens (default `127.0.0.1:5050`) |
 | `REQUEST_TIMEOUT` | Per-request timeout in seconds (default 120) |
 
@@ -95,6 +95,41 @@ FLASK_HOST=127.0.0.1
 FLASK_PORT=5050
 REQUEST_TIMEOUT=120
 ```
+
+On first launch, the `.env` endpoint and model become the first saved connection. After
+that, connections are managed from the top bar and stored in `profiles.json` next to
+`app.py`; delete that file to re-seed from `.env`.
+
+## Switching endpoints and models
+
+The dropdown in the top bar lists every saved base URL + model pair. Picking one
+switches the whole app immediately — chat, single call, and load tests all use it.
+
+- **Edit** opens the editor pre-filled with the active pair.
+- Change the **Base URL** and **Model**, then **Save & use**. A new pair is appended to
+  the dropdown; an existing pair is reused instead of duplicated.
+- The model field suggests ids reported by the endpoint's `/v1/models`.
+- **Delete** removes the active connection (the last one cannot be deleted).
+
+```text
+Base URL   http://localhost:8000/v1
+Model      Qwen/Qwen3-0.6B
+```
+
+`profiles.json` looks like this and is safe to edit by hand while the app is stopped:
+
+```json
+{
+  "active_id": "default",
+  "profiles": [
+    { "id": "default", "base_url": "http://localhost:8000/v1", "model": "Qwen/Qwen3-0.6B" },
+    { "id": "a1b2c3d4", "base_url": "http://gpu-box:8000/v1", "model": "meta-llama/Llama-3.1-8B-Instruct" }
+  ]
+}
+```
+
+The API key and timeout are process-wide, so connections that need different keys are
+out of scope for now.
 
 ## What the numbers mean
 
@@ -118,7 +153,10 @@ lower than a pooled client's.
 
 | Route | Purpose |
 | --- | --- |
-| `GET /api/config` | Endpoint, model, model list, whether a key is set |
+| `GET /api/config` | Active connection, saved profiles, model list, whether a key is set |
+| `POST /api/profiles` | Save (upsert) a `base_url` + `model` pair and activate it |
+| `POST /api/profiles/<id>/activate` | Switch the active connection |
+| `DELETE /api/profiles/<id>` | Remove a saved connection |
 | `POST /api/chat/stream` | SSE proxy: `delta`, `done`, `error` events |
 | `POST /api/loadtest` | Start a run, returns `{id}` |
 | `GET /api/loadtest/<id>/stream` | SSE: `start`, `delta`, `result`, `done`, `error` |

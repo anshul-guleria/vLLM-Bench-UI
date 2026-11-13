@@ -86,6 +86,37 @@ document.querySelectorAll(".rail-tab").forEach((btn) => {
 
 /* ---------- config ---------------------------------------------------- */
 
+function activeProfile(config) {
+  return (config.profiles || []).find((profile) => profile.id === config.active_id) || null;
+}
+
+function renderConnections(config) {
+  const select = $("profile-select");
+  select.replaceChildren();
+  for (const profile of config.profiles || []) {
+    const option = document.createElement("option");
+    option.value = profile.id;
+    option.textContent = `${profile.model} · ${profile.base_url}`;
+    select.append(option);
+  }
+  select.value = config.active_id;
+
+  const list = $("model-options");
+  list.replaceChildren();
+  for (const id of config.models || []) {
+    const option = document.createElement("option");
+    option.value = id;
+    list.append(option);
+  }
+
+  const active = activeProfile(config);
+  if ($("connection-form").hidden && active) {
+    $("connection-url").value = active.base_url;
+    $("connection-model").value = active.model;
+  }
+  $("connection-delete").disabled = (config.profiles || []).length <= 1;
+}
+
 async function loadConfig() {
   const dot = $("conn-dot");
   const label = $("conn-label");
@@ -102,8 +133,7 @@ async function loadConfig() {
     $("rail-endpoint").textContent = config.base_url;
     $("rail-model").textContent = config.model || "not set";
     $("rail-key").textContent = config.api_key_set ? "set" : "none";
-    $("model-chip").textContent = config.model || "no model";
-    $("model-chip").title = config.model || "";
+    renderConnections(config);
 
     const count = (config.models || []).length;
     if (count > 0) {
@@ -123,6 +153,99 @@ async function loadConfig() {
 }
 
 $("refresh").addEventListener("click", loadConfig);
+
+/* ---------- saved connections ---------------------------------------- */
+
+function showEditor(show) {
+  const form = $("connection-form");
+  form.hidden = !show;
+  if (!show) return;
+  const active = state.config ? activeProfile(state.config) : null;
+  if (active) {
+    $("connection-url").value = active.base_url;
+    $("connection-model").value = active.model;
+  }
+  $("connection-url").focus();
+  $("connection-url").select();
+}
+
+$("profile-edit").addEventListener("click", () => showEditor($("connection-form").hidden));
+$("connection-cancel").addEventListener("click", () => showEditor(false));
+
+$("profile-select").addEventListener("change", async (event) => {
+  const id = event.target.value;
+  event.target.disabled = true;
+  try {
+    const response = await fetch(`/api/profiles/${id}/activate`, { method: "POST" });
+    if (!response.ok) {
+      const payload = await response.json().catch(() => ({}));
+      throw new Error(payload.error || `Could not switch (HTTP ${response.status})`);
+    }
+    showEditor(false);
+    await loadConfig();
+    flash("Switched connection.");
+  } catch (error) {
+    flash(error.message, true);
+    await loadConfig();
+  } finally {
+    event.target.disabled = false;
+  }
+});
+
+$("connection-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const baseUrl = $("connection-url").value.trim();
+  const model = $("connection-model").value.trim();
+  if (!baseUrl || !model) {
+    flash("Base URL and model are both required.", true);
+    return;
+  }
+
+  const save = $("connection-save");
+  save.disabled = true;
+  save.textContent = "Saving…";
+  try {
+    const response = await fetch("/api/profiles", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ base_url: baseUrl, model }),
+    });
+    if (!response.ok) {
+      const payload = await response.json().catch(() => ({}));
+      throw new Error(payload.error || `Could not save (HTTP ${response.status})`);
+    }
+    showEditor(false);
+    await loadConfig();
+    flash("Connection saved.");
+  } catch (error) {
+    flash(error.message, true);
+  } finally {
+    save.disabled = false;
+    save.textContent = "Save & use";
+  }
+});
+
+$("connection-delete").addEventListener("click", async () => {
+  if (!state.config) return;
+  if (!window.confirm("Remove this saved connection?")) return;
+
+  const button = $("connection-delete");
+  button.disabled = true;
+  try {
+    const response = await fetch(`/api/profiles/${state.config.active_id}`, { method: "DELETE" });
+    if (!response.ok) {
+      const payload = await response.json().catch(() => ({}));
+      throw new Error(payload.error || `Could not delete (HTTP ${response.status})`);
+    }
+    showEditor(false);
+    await loadConfig();
+    flash("Connection removed.");
+  } catch (error) {
+    flash(error.message, true);
+  } finally {
+    button.disabled = false;
+  }
+});
 
 /* ---------- SSE over fetch ------------------------------------------- */
 

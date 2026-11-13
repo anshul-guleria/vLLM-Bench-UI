@@ -157,3 +157,87 @@ def test_load_test_without_streaming_has_no_delta_events(client):
     assert not [name for name, _ in events if name == "delta"]
     assert len([name for name, _ in events if name == "result"]) == 2
 
+
+# ---------------------------------------------------------------------------
+# Saved connections
+# ---------------------------------------------------------------------------
+
+
+def test_config_lists_the_seeded_connection(client):
+    body = client.get("/api/config").get_json()
+
+    assert body["profiles"][0]["model"] == "fake-model"
+    assert body["active_id"] == body["profiles"][0]["id"]
+
+
+def test_saving_a_new_connection_switches_to_it(client):
+    saved = client.post(
+        "/api/profiles",
+        json={"base_url": "http://second:9000/v1/", "model": "other-model"},
+    )
+
+    assert saved.status_code == 201
+    state = saved.get_json()
+    assert state["model"] == "other-model"
+    assert state["base_url"] == "http://second:9000/v1"
+    assert len(state["profiles"]) == 2
+
+    config = client.get("/api/config").get_json()
+    assert config["model"] == "other-model"
+    assert config["active_id"] == state["active_id"]
+
+
+def test_activating_a_saved_connection_switches_back(client):
+    first_id = client.get("/api/config").get_json()["profiles"][0]["id"]
+    client.post("/api/profiles", json={"base_url": "http://second:9000/v1", "model": "other-model"})
+
+    activated = client.post(f"/api/profiles/{first_id}/activate")
+
+    assert activated.status_code == 200
+    assert activated.get_json()["model"] == "fake-model"
+
+
+def test_deleting_the_active_connection_falls_back(client):
+    client.post("/api/profiles", json={"base_url": "http://second:9000/v1", "model": "other-model"})
+    state = client.get("/api/config").get_json()
+    active_id = state["active_id"]
+
+    deleted = client.delete(f"/api/profiles/{active_id}")
+
+    assert deleted.status_code == 200
+    assert deleted.get_json()["model"] == "fake-model"
+    assert len(deleted.get_json()["profiles"]) == 1
+
+
+def test_last_connection_cannot_be_deleted(client):
+    active_id = client.get("/api/config").get_json()["active_id"]
+
+    response = client.delete(f"/api/profiles/{active_id}")
+
+    assert response.status_code == 400
+
+
+def test_bad_connection_input_is_rejected(client):
+    assert client.post("/api/profiles", json={"base_url": "ftp://nope", "model": "m"}).status_code == 400
+    assert client.post("/api/profiles", json={"base_url": "http://ok/v1", "model": " "}).status_code == 400
+
+
+def test_connections_persist_across_app_restarts(fake, tmp_path):
+    path = tmp_path / "profiles.json"
+    first_app = create_app(
+        Endpoint(base_url=fake.base_url, api_key="", model="fake-model", timeout=10),
+        profiles_path=path,
+    )
+    first_client = first_app.test_client()
+    first_client.post("/api/profiles", json={"base_url": "http://second:9000/v1", "model": "other-model"})
+
+    second_app = create_app(
+        Endpoint(base_url=fake.base_url, api_key="", model="fake-model", timeout=10),
+        profiles_path=path,
+    )
+    body = second_app.test_client().get("/api/config").get_json()
+
+    assert body["model"] == "other-model"
+    assert len(body["profiles"]) == 2
+
+
